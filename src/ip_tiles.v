@@ -14,7 +14,7 @@ module ip_tiles #(
     input  wire       active,
     output reg  [5:0] rgb
 );
-    localparam IDX_W = $clog2(MAX_TILES);
+    localparam IDX_W = (MAX_TILES <= 1) ? 1 : $clog2(MAX_TILES);
 
     // ------------------------------------------------------------------
     // button edge detection
@@ -32,7 +32,6 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     reg  [9:0]  tile_y     [0:MAX_TILES-1];
     reg  [1:0]  tile_lane  [0:MAX_TILES-1];
-    reg  [10:0] tile_x     [0:MAX_TILES-1];
     reg         tile_alive [0:MAX_TILES-1];
 
     // game-state registers
@@ -112,9 +111,6 @@ module ip_tiles #(
     end
 
     wire [1:0]  next_lane    = lfsr[1:0];
-    wire [10:0] next_lane_x  = 11'd20
-                             + {2'd0, next_lane, 7'd0}
-                             + {4'd0, next_lane, 5'd0};
 
     wire spawn_due   = step && !ended
                        && (spawn_count >= interval_cur - 6'd1);
@@ -131,12 +127,10 @@ module ip_tiles #(
                     tile_alive[g] <= 1'b0;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= 2'd0;
-                    tile_x[g]     <= 11'd20;
                 end else if (spawn_pulse && (spawn_idx == G_IDX)) begin
                     tile_alive[g] <= 1'b1;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= next_lane;
-                    tile_x[g]     <= next_lane_x;
                 end else if (hittable[g] || miss_vec[g]) begin
                     tile_alive[g] <= 1'b0;
                 end else if (step && !ended && tile_alive[g]) begin
@@ -198,8 +192,11 @@ module ip_tiles #(
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_render
             wire [10:0] x11   = {1'b0, x};
             wire [10:0] y11   = {1'b0, y};
-            wire [10:0] tx_lo = tile_x[g];
-            wire [10:0] tx_hi = tile_x[g] + TILE_W;
+            // Lane positions are fixed, so derive X instead of storing it
+            // in 11 flip-flops per tile.
+            wire [10:0] tx_lo = 11'd20 + ({9'd0, tile_lane[g]} << 7)
+                                      + ({9'd0, tile_lane[g]} << 5);
+            wire [10:0] tx_hi = tx_lo + TILE_W;
             wire [10:0] ty_lo = {1'b0, tile_y[g]};
             wire [10:0] ty_hi = ty_lo + TILE_H;
             assign tile_pixel[g] = tile_alive[g]
