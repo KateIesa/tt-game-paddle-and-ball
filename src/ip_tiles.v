@@ -5,7 +5,7 @@ module ip_tiles #(
     parameter TILE_W         = 120,
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
-    parameter HIT_ZONE       = 50,
+    parameter HIT_ZONE       = 60,
     parameter [3:0] LEVEL_UP_AT = 4'd15
 ) (
     input  wire       clk, rst_n, step,
@@ -16,20 +16,8 @@ module ip_tiles #(
 );
     localparam IDX_W = $clog2(MAX_TILES);
 
-    function [9:0] lane_offset;
-        input [1:0] lane;
-        begin
-            case (lane)
-                2'd0: lane_offset = 10'd20;
-                2'd1: lane_offset = 10'd180;
-                2'd2: lane_offset = 10'd340;
-                2'd3: lane_offset = 10'd500;
-            endcase
-        end
-    endfunction
-
     // ------------------------------------------------------------------
-    // button edge detection  (no per-lane flash afterglow)
+    // button edge detection
     // ------------------------------------------------------------------
     reg  [3:0] btn_prev;
     always @(posedge clk) btn_prev <= btn;
@@ -37,14 +25,16 @@ module ip_tiles #(
     wire       any_pushed = |btn_pushed;
 
     wire [3:0] lane_active = btn;
-    // ------------------------------------------------------------------
-    // per-tile state
-    // ------------------------------------------------------------------
-    reg  [9:0] tile_y     [0:MAX_TILES-1];
-    reg  [1:0] tile_lane  [0:MAX_TILES-1];
-    reg        tile_alive [0:MAX_TILES-1];
 
-    // narrowed game-state registers
+    // ------------------------------------------------------------------
+    // per-tile state  — tile_x is now cached at spawn
+    // ------------------------------------------------------------------
+    reg  [9:0]  tile_y     [0:MAX_TILES-1];
+    reg  [1:0]  tile_lane  [0:MAX_TILES-1];
+    reg  [10:0] tile_x     [0:MAX_TILES-1];   // ← NEW: precomputed lane X
+    reg         tile_alive [0:MAX_TILES-1];
+
+    // game-state registers
     reg  [5:0] spawn_count;
     reg  [3:0] lfsr;
     reg  [3:0] level_progress;
@@ -62,8 +52,8 @@ module ip_tiles #(
         case (level)
             3'd2: begin speed_cur <= 5'd6;  interval_cur <= 6'd20; end
             3'd3: begin speed_cur <= 5'd8;  interval_cur <= 6'd15; end
-            3'd4: begin speed_cur <= 5'd10; interval_cur <= 6'd14; end  // was 12
-            3'd5: begin speed_cur <= 5'd12; interval_cur <= 6'd12; end  // was 10
+            3'd4: begin speed_cur <= 5'd10; interval_cur <= 6'd14; end
+            3'd5: begin speed_cur <= 5'd12; interval_cur <= 6'd12; end
             default: begin speed_cur <= 5'd4; interval_cur <= 6'd30; end
         endcase
     end
@@ -122,13 +112,18 @@ module ip_tiles #(
             end
     end
 
-    wire [1:0] next_lane = lfsr[1:0];
-    wire spawn_due       = step && !game_over && !won
-                           && (spawn_count >= interval_cur - 6'd1);
-    wire spawn_pulse     = spawn_due && spawn_slot_free;
+    wire [1:0]  next_lane    = lfsr[1:0];
+    // precomputed lane X = 20 + lane*160, done once per spawn instead of per pixel
+    wire [10:0] next_lane_x  = 11'd20
+                             + {2'd0, next_lane, 7'd0}    // lane * 128
+                             + {4'd0, next_lane, 5'd0};   // lane * 32
+
+    wire spawn_due   = step && !game_over && !won
+                       && (spawn_count >= interval_cur - 6'd1);
+    wire spawn_pulse = spawn_due && spawn_slot_free;
 
     // ------------------------------------------------------------------
-    // per-tile always blocks
+    // per-tile always blocks  — caches tile_x at spawn
     // ------------------------------------------------------------------
     generate
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_state
@@ -138,10 +133,12 @@ module ip_tiles #(
                     tile_alive[g] <= 1'b0;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= 2'd0;
+                    tile_x[g]     <= 11'd20;    // lane 0 default
                 end else if (spawn_pulse && (spawn_idx == G_IDX)) begin
                     tile_alive[g] <= 1'b1;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= next_lane;
+                    tile_x[g]     <= next_lane_x;    // ← latch once
                 end else if (hittable[g] || miss_vec[g]) begin
                     tile_alive[g] <= 1'b0;
                 end else if (step && !game_over && !won && tile_alive[g]) begin
@@ -201,17 +198,15 @@ module ip_tiles #(
     end
 
     // ------------------------------------------------------------------
-    // tile rendering
+    // tile rendering  — reads cached tile_x, no per-pixel multiply
     // ------------------------------------------------------------------
     wire [MAX_TILES-1:0] tile_pixel;
     generate
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_render
             wire [10:0] x11   = {1'b0, x};
             wire [10:0] y11   = {1'b0, y};
-            wire [10:0] tx_lo = 11'd20
-                  + {2'd0, tile_lane[g], 7'd0}   // lane * 128
-                  + {4'd0, tile_lane[g], 5'd0};  // lane * 32
-            wire [10:0] tx_hi = tx_lo + TILE_W;
+            wire [10:0] tx_lo = tile_x[g];
+            wire [10:0] tx_hi = tile_x[g] + TILE_W;
             wire [10:0] ty_lo = {1'b0, tile_y[g]};
             wire [10:0] ty_hi = ty_lo + TILE_H;
             assign tile_pixel[g] = tile_alive[g]
@@ -222,7 +217,7 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // Level-progress bar (color = current level)
+    // Level-progress bar (colour = current level)
     // ------------------------------------------------------------------
     wire [4:0] step_count  = {1'b0, level_progress} + 5'd1;
     wire [9:0] progress_px = ({5'd0, step_count} << 5)
@@ -237,12 +232,12 @@ module ip_tiles #(
                                                   6'b11_00_11;
 
     // ------------------------------------------------------------------
-    // Three separate life blocks
+    // Three separate life blocks (shared row check)
     // ------------------------------------------------------------------
     wire in_lives_row = (y >= 10'd10) && (y < 10'd26);
     wire blk0 = in_lives_row && (x >= 10'd568) && (x < 10'd588) && (lives >= 2'd1);
     wire blk1 = in_lives_row && (x >= 10'd592) && (x < 10'd612) && (lives >= 2'd2);
-    wire blk2 = in_lives_row && (x >= 10'd616) && (x < 10'd636) && (lives >= 2'd3); 
+    wire blk2 = in_lives_row && (x >= 10'd616) && (x < 10'd636) && (lives >= 2'd3);
     wire lives_pixel = blk0 || blk1 || blk2;
 
     // ------------------------------------------------------------------
