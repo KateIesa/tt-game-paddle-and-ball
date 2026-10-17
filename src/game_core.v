@@ -11,7 +11,6 @@ module game_core #(
     output wire [5:0] rgb
 );
     wire [3:0] btn_clean;
-
     generate
         for (genvar b = 0; b < 4; b = b + 1) begin : db
             ip_debounce #(.N(DB)) u_db (
