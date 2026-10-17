@@ -1,7 +1,7 @@
 `default_nettype none
 
 module ip_tiles #(
-    parameter MAX_TILES      = 4,
+    parameter MAX_TILES      = 3,
     parameter TILE_W         = 120,
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
@@ -46,16 +46,16 @@ module ip_tiles #(
     reg        tile_alive [0:MAX_TILES-1];
 
     // narrowed game-state registers
-    reg  [5:0] spawn_count;      // max 30
-    reg  [3:0] lfsr;             // 4-bit LFSR
-    reg  [3:0] level_progress;   // max 15
+    reg  [5:0] spawn_count;
+    reg  [3:0] lfsr;
+    reg  [3:0] level_progress;
     reg  [1:0] lives;
-    reg  [2:0] level;            // max 5
+    reg  [2:0] level;
     reg        game_over;
     reg        won;
 
-    reg  [4:0] speed_cur;        // max 12
-    reg  [5:0] interval_cur;     // max 30
+    reg  [4:0] speed_cur;
+    reg  [5:0] interval_cur;
 
     wire restart_clear = (game_over || won) && any_pushed;
 
@@ -63,8 +63,8 @@ module ip_tiles #(
         case (level)
             3'd2: begin speed_cur <= 5'd6;  interval_cur <= 6'd20; end
             3'd3: begin speed_cur <= 5'd8;  interval_cur <= 6'd15; end
-            3'd4: begin speed_cur <= 5'd10; interval_cur <= 6'd12; end
-            3'd5: begin speed_cur <= 5'd12; interval_cur <= 6'd10; end
+            3'd4: begin speed_cur <= 5'd10; interval_cur <= 6'd14; end  // was 12
+            3'd5: begin speed_cur <= 5'd12; interval_cur <= 6'd12; end  // was 10
             default: begin speed_cur <= 5'd4; interval_cur <= 6'd30; end
         endcase
     end
@@ -108,7 +108,7 @@ module ip_tiles #(
     wire progress_down = !any_hit &&  any_wrong_press;
 
     // ------------------------------------------------------------------
-    // spawn slot finder  (integer declared inside the always block)
+    // spawn slot finder
     // ------------------------------------------------------------------
     reg [IDX_W-1:0] spawn_idx;
     reg             spawn_slot_free;
@@ -129,7 +129,7 @@ module ip_tiles #(
     wire spawn_pulse     = spawn_due && spawn_slot_free;
 
     // ------------------------------------------------------------------
-    // per-tile always blocks  (hittable + miss merged)
+    // per-tile always blocks
     // ------------------------------------------------------------------
     generate
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_state
@@ -175,7 +175,7 @@ module ip_tiles #(
             if (spawn_due) begin
                 spawn_count <= 6'd0;
                 if (spawn_pulse)
-                    lfsr <= {lfsr[2:0], lfsr[3]^lfsr[0]};   // maximal 4-bit LFSR
+                    lfsr <= {lfsr[2:0], lfsr[3]^lfsr[0]};
             end else if (step) begin
                 spawn_count <= spawn_count + 6'd1;
             end
@@ -221,22 +221,22 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // Level-progress bar  (color = current level)
+    // Level-progress bar (color = current level)
     // ------------------------------------------------------------------
     wire [4:0] step_count  = {1'b0, level_progress} + 5'd1;
     wire [9:0] progress_px = ({5'd0, step_count} << 5)
-                           + ({5'd0, step_count} << 3);   // step_count * 40
+                           + ({5'd0, step_count} << 3);
 
     wire progress_bar = (y < 10'd8) && (x < progress_px);
 
-    wire [5:0] progress_color = (level == 3'd1) ? 6'b00_11_00 :   // green
-                                (level == 3'd2) ? 6'b11_11_00 :   // yellow
-                                (level == 3'd3) ? 6'b11_10_00 :   // orange
-                                (level == 3'd4) ? 6'b11_00_00 :   // red
-                                                  6'b11_00_11;    // magenta
+    wire [5:0] progress_color = (level == 3'd1) ? 6'b00_11_00 :
+                                (level == 3'd2) ? 6'b11_11_00 :
+                                (level == 3'd3) ? 6'b11_10_00 :
+                                (level == 3'd4) ? 6'b11_00_00 :
+                                                  6'b11_00_11;
 
     // ------------------------------------------------------------------
-    // Three separate life blocks, top-right
+    // Three separate life blocks
     // ------------------------------------------------------------------
     wire blk0 = (x >= 10'd568) && (x < 10'd588) && (y >= 10'd10) && (y < 10'd26)
                 && (lives >= 2'd1);
