@@ -40,6 +40,7 @@ module ip_tiles #(
     reg  [3:0] level_progress;
     reg  [2:0] level;
     reg        ended;
+    reg        is_win;              // ← NEW: distinguishes win from loss
 
     reg  [4:0] speed_cur;
     reg  [5:0] interval_cur;
@@ -154,6 +155,7 @@ module ip_tiles #(
             level_progress <= 4'd0;
             level          <= 3'd1;
             ended          <= 1'b0;
+            is_win         <= 1'b0;         // ← reset win flag
             if (!rst_n) lfsr <= 4'hA;
         end else if (!ended) begin
             if (spawn_due) begin
@@ -169,8 +171,10 @@ module ip_tiles #(
                     level_progress <= 4'd0;
                     if (level < 3'd5)
                         level <= level + 3'd1;
-                    else
-                        ended <= 1'b1;
+                    else begin
+                        ended  <= 1'b1;
+                        is_win <= 1'b1;     // ← win: completed level 5
+                    end
                 end else begin
                     level_progress <= level_progress + 4'd1;
                 end
@@ -180,7 +184,8 @@ module ip_tiles #(
 
             if (any_miss) begin
                 if (level == 3'd1) begin
-                    ended <= 1'b1;
+                    ended  <= 1'b1;
+                    is_win <= 1'b0;         // ← loss: missed at level 1
                 end else begin
                     level          <= level - 3'd1;
                     level_progress <= 4'd0;
@@ -211,8 +216,8 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     // 5-segment progress bar (one segment per level, single colour)
     // ------------------------------------------------------------------
-    wire [9:0] bar_right = ({7'd0, level}              << 7)   // level      * 128
-                         + ({5'd0, level_progress}     << 3)   // progress   * 8
+    wire [9:0] bar_right = ({7'd0, level}              << 7)
+                         + ({5'd0, level_progress}     << 3)
                          - 10'd120;
     wire bar_pixel = (y < 10'd8) && (x < bar_right);
 
@@ -233,16 +238,17 @@ module ip_tiles #(
     wire lane_div = (x == 10'd160) || (x == 10'd320) || (x == 10'd480);
 
     // ------------------------------------------------------------------
-    // colour priority
+    // colour priority — GREEN win, RED loss
     // ------------------------------------------------------------------
     always @(*) begin
-        if (!active)               rgb = 6'b00_00_00;
-        else if (ended)            rgb = 6'b11_00_00;
-        else if (any_tile_pixel)   rgb = 6'b11_11_11;
-        else if (bar_pixel)        rgb = 6'b00_11_00;   // single green bar
-        else if (hit_line_pressed) rgb = 6'b11_11_00;   // yellow pressed lane
-        else if (on_hit_line)      rgb = 6'b00_11_11;   // cyan default
-        else if (lane_div)         rgb = 6'b01_01_01;   // grey dividers
-        else                       rgb = 6'b00_00_01;   // dark blue background
+        if (!active)                rgb = 6'b00_00_00;
+        else if (ended && is_win)   rgb = 6'b00_11_00;   // ← green victory
+        else if (ended)             rgb = 6'b11_00_00;   // red defeat
+        else if (any_tile_pixel)    rgb = 6'b11_11_11;   // white tile
+        else if (bar_pixel)         rgb = 6'b00_11_00;   // green progress bar
+        else if (hit_line_pressed)  rgb = 6'b11_11_00;   // yellow pressed lane
+        else if (on_hit_line)       rgb = 6'b00_11_11;   // cyan default
+        else if (lane_div)          rgb = 6'b01_01_01;   // grey dividers
+        else                        rgb = 6'b00_00_01;   // dark blue background
     end
 endmodule
