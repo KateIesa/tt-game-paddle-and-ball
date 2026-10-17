@@ -208,7 +208,9 @@ module ip_tiles #(
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_render
             wire [10:0] x11   = {1'b0, x};
             wire [10:0] y11   = {1'b0, y};
-            wire [10:0] tx_lo = {1'b0, lane_offset(tile_lane[g])};
+            wire [10:0] tx_lo = 11'd20
+                  + {2'd0, tile_lane[g], 7'd0}   // lane * 128
+                  + {4'd0, tile_lane[g], 5'd0};  // lane * 32
             wire [10:0] tx_hi = tx_lo + TILE_W;
             wire [10:0] ty_lo = {1'b0, tile_y[g]};
             wire [10:0] ty_hi = ty_lo + TILE_H;
@@ -237,12 +239,10 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     // Three separate life blocks
     // ------------------------------------------------------------------
-    wire blk0 = (x >= 10'd568) && (x < 10'd588) && (y >= 10'd10) && (y < 10'd26)
-                && (lives >= 2'd1);
-    wire blk1 = (x >= 10'd592) && (x < 10'd612) && (y >= 10'd10) && (y < 10'd26)
-                && (lives >= 2'd2);
-    wire blk2 = (x >= 10'd616) && (x < 10'd636) && (y >= 10'd10) && (y < 10'd26)
-                && (lives >= 2'd3);
+    wire in_lives_row = (y >= 10'd10) && (y < 10'd26);
+    wire blk0 = in_lives_row && (x >= 10'd568) && (x < 10'd588) && (lives >= 2'd1);
+    wire blk1 = in_lives_row && (x >= 10'd592) && (x < 10'd612) && (lives >= 2'd2);
+    wire blk2 = in_lives_row && (x >= 10'd616) && (x < 10'd636) && (lives >= 2'd3); 
     wire lives_pixel = blk0 || blk1 || blk2;
 
     // ------------------------------------------------------------------
@@ -256,8 +256,7 @@ module ip_tiles #(
                          (x < 10'd480) ? 2'd2 : 2'd3;
     wire hit_line_pressed = on_hit_line && lane_active[x_lane];
 
-    wire lane_div = (x == 10'd0) || (x == 10'd160) || (x == 10'd320)
-                    || (x == 10'd480) || (x == 10'd639);
+    wire lane_div = (x == 10'd160) || (x == 10'd320) || (x == 10'd480);
 
     // ------------------------------------------------------------------
     // colour priority
