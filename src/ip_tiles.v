@@ -1,7 +1,7 @@
 `default_nettype none
 
 module ip_tiles #(
-    parameter MAX_TILES      = 3,
+    parameter MAX_TILES      = 2,
     parameter TILE_W         = 120,
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
