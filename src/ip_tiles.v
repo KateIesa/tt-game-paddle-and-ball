@@ -184,8 +184,9 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     reg [IDX_W-1:0] spawn_idx;
     reg             spawn_slot_free;
-    integer k;
+    
     always @(*) begin
+        integer k;
         spawn_idx       = {IDX_W{1'b0}};
         spawn_slot_free = 1'b0;
         for (k = MAX_TILES-1; k >= 0; k = k - 1)

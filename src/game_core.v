@@ -1,6 +1,6 @@
 `default_nettype none
 module game_core #(
-    parameter DB = 100000    // 4 ms at 25 MHz (snappier than 20 ms for rhythm play)
+    parameter DB = 250000    // 10 ms at 25 MHz (snappier than 20 ms for rhythm play)
 ) (
     input  wire       clk,
     input  wire       rst_n,
