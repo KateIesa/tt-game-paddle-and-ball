@@ -14,7 +14,7 @@ module ip_tiles #(
     input  wire       active,
     output reg  [5:0] rgb
 );
-    localparam IDX_W = (MAX_TILES <= 1) ? 1 : $clog2(MAX_TILES);
+    localparam IDX_W = $clog2(MAX_TILES);
 
     // ------------------------------------------------------------------
     // button edge detection
@@ -24,7 +24,6 @@ module ip_tiles #(
     wire [3:0] btn_pushed = btn & ~btn_prev;
     wire       any_pushed = |btn_pushed;
 
-    // held-button signal for the hit-line highlight
     wire [3:0] lane_active = btn;
 
     // ------------------------------------------------------------------
@@ -32,6 +31,7 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     reg  [9:0]  tile_y     [0:MAX_TILES-1];
     reg  [1:0]  tile_lane  [0:MAX_TILES-1];
+    reg  [10:0] tile_x     [0:MAX_TILES-1];
     reg         tile_alive [0:MAX_TILES-1];
 
     // game-state registers
@@ -111,6 +111,9 @@ module ip_tiles #(
     end
 
     wire [1:0]  next_lane    = lfsr[1:0];
+    wire [10:0] next_lane_x  = 11'd20
+                             + {2'd0, next_lane, 7'd0}
+                             + {4'd0, next_lane, 5'd0};
 
     wire spawn_due   = step && !ended
                        && (spawn_count >= interval_cur - 6'd1);
@@ -127,10 +130,12 @@ module ip_tiles #(
                     tile_alive[g] <= 1'b0;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= 2'd0;
+                    tile_x[g]     <= 11'd20;
                 end else if (spawn_pulse && (spawn_idx == G_IDX)) begin
                     tile_alive[g] <= 1'b1;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= next_lane;
+                    tile_x[g]     <= next_lane_x;
                 end else if (hittable[g] || miss_vec[g]) begin
                     tile_alive[g] <= 1'b0;
                 end else if (step && !ended && tile_alive[g]) begin
@@ -192,11 +197,8 @@ module ip_tiles #(
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_render
             wire [10:0] x11   = {1'b0, x};
             wire [10:0] y11   = {1'b0, y};
-            // Lane positions are fixed, so derive X instead of storing it
-            // in 11 flip-flops per tile.
-            wire [10:0] tx_lo = 11'd20 + ({9'd0, tile_lane[g]} << 7)
-                                      + ({9'd0, tile_lane[g]} << 5);
-            wire [10:0] tx_hi = tx_lo + TILE_W;
+            wire [10:0] tx_lo = tile_x[g];
+            wire [10:0] tx_hi = tile_x[g] + TILE_W;
             wire [10:0] ty_lo = {1'b0, tile_y[g]};
             wire [10:0] ty_hi = ty_lo + TILE_H;
             assign tile_pixel[g] = tile_alive[g]
@@ -207,19 +209,15 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // Level-progress bar
+    // 5-segment progress bar (one segment per level, single colour)
     // ------------------------------------------------------------------
-    wire [4:0] step_count  = {1'b0, level_progress} + 5'd1;
-    wire [9:0] progress_px = {5'd0, step_count} << 5;
-
-    wire progress_bar = (y < 10'd8) && (x < progress_px);
-
-    wire [5:0] progress_color = (level <= 3'd2) ? 6'b00_11_00 :
-                                (level == 3'd3) ? 6'b11_11_00 :
-                                                  6'b11_00_00;
+    wire [9:0] bar_right = ({7'd0, level}              << 7)   // level      * 128
+                         + ({5'd0, level_progress}     << 3)   // progress   * 8
+                         - 10'd120;
+    wire bar_pixel = (y < 10'd8) && (x < bar_right);
 
     // ------------------------------------------------------------------
-    // hit line — RESTORED: press highlight per lane
+    // hit line + press highlight
     // ------------------------------------------------------------------
     wire [10:0] y11_hud = {1'b0, y};
     wire on_hit_line = (y11_hud >= HIT_Y) && (y11_hud < HIT_Y + 11'd2);
@@ -230,7 +228,7 @@ module ip_tiles #(
     wire hit_line_pressed = on_hit_line && lane_active[x_lane];
 
     // ------------------------------------------------------------------
-    // lane dividers — RESTORED
+    // lane dividers
     // ------------------------------------------------------------------
     wire lane_div = (x == 10'd160) || (x == 10'd320) || (x == 10'd480);
 
@@ -241,10 +239,10 @@ module ip_tiles #(
         if (!active)               rgb = 6'b00_00_00;
         else if (ended)            rgb = 6'b11_00_00;
         else if (any_tile_pixel)   rgb = 6'b11_11_11;
-        else if (progress_bar)     rgb = progress_color;
+        else if (bar_pixel)        rgb = 6'b00_11_00;   // single green bar
         else if (hit_line_pressed) rgb = 6'b11_11_00;   // yellow pressed lane
         else if (on_hit_line)      rgb = 6'b00_11_11;   // cyan default
-        else if (lane_div)         rgb = 6'b01_01_01;   // grey divider lines
-        else                       rgb = 6'b00_00_01;
+        else if (lane_div)         rgb = 6'b01_01_01;   // grey dividers
+        else                       rgb = 6'b00_00_01;   // dark blue background
     end
 endmodule
