@@ -1,12 +1,12 @@
 `default_nettype none
 
 module ip_tiles #(
-    parameter MAX_TILES      = 5,
+    parameter MAX_TILES      = 4,
     parameter TILE_W         = 120,
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
     parameter HIT_ZONE       = 60,
-    parameter [7:0] SCORE_WIN     = 8'd128,
+    parameter [7:0] SCORE_WIN     = 8'd99,
     parameter [4:0] FLASH_FRAMES  = 5'd12,
     parameter [4:0] LEVEL_UP_AT   = 5'd15
 ) (
@@ -18,8 +18,8 @@ module ip_tiles #(
 );
     localparam IDX_W = $clog2(MAX_TILES);
 
-    // score digit layout (centred)
-    localparam [9:0] DIG_X0    = 10'd292;
+    // TWO-digit score layout (centred)
+    localparam [9:0] DIG_X0    = 10'd302;   // (640 - 36) / 2
     localparam [9:0] DIG_Y0    = 10'd4;
     localparam [9:0] DIG_PITCH = 10'd20;
     localparam [9:0] DIG_W     = 10'd16;
@@ -37,7 +37,6 @@ module ip_tiles #(
         end
     endfunction
 
-    // 7-seg pattern decoder: {A,B,C,D,E,F,G}
     function [6:0] seg_pattern;
         input [3:0] d;
         begin
@@ -56,7 +55,6 @@ module ip_tiles #(
         end
     endfunction
 
-    // 7-seg pixel test inside a single digit cell
     function seg_pixel;
         input [6:0] segs;
         input [5:0] xl, yl;
@@ -80,7 +78,6 @@ module ip_tiles #(
     wire [3:0] btn_pushed = btn & ~btn_prev;
     wire       any_pushed = |btn_pushed;
 
-    // per-lane hit-line flash
     reg  [4:0] flash_cnt [0:3];
     wire [3:0] lane_active;
     genvar fb;
@@ -102,7 +99,6 @@ module ip_tiles #(
     reg  [1:0] tile_lane  [0:MAX_TILES-1];
     reg        tile_alive [0:MAX_TILES-1];
 
-    // game state
     reg  [7:0] spawn_count;
     reg  [7:0] lfsr;
     reg  [1:0] prev_lane;
@@ -149,7 +145,6 @@ module ip_tiles #(
     wire any_hit  = |hittable;
     wire any_miss = |miss_vec;
 
-    // per-lane presence
     wire [3:0] lane_has_tile;
     generate
         for (g = 0; g < 4; g = g + 1) begin : lane_pres
@@ -206,7 +201,7 @@ module ip_tiles #(
                 end else if (hittable[g]) begin
                     tile_alive[g] <= 1'b0;
                 end else if (miss_vec[g]) begin
-                    tile_alive[g] <= 1'b0;               // deactivate on miss
+                    tile_alive[g] <= 1'b0;           // deactivate on miss
                 end else if (step && !game_over && !won
                              && tile_alive[g] && !miss_vec[g]) begin
                     tile_y[g] <= tile_y[g] + speed_cur;
@@ -285,47 +280,38 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // HUD: SCORE DIGITS (comparator-chain BCD, no multiplier)
+    // HUD: TWO-digit score (comparator-chain BCD, no multiplier)
     // ------------------------------------------------------------------
-    wire [7:0] s_val      = score;
-    wire [3:0] h_dig      = (s_val >= 8'd100) ? 4'd1 : 4'd0;
-    wire [7:0] s_after_h  = s_val - (h_dig == 4'd1 ? 8'd100 : 8'd0);
+    // score is guaranteed 0..99 because SCORE_WIN = 99 and score never overflows.
+    wire [3:0] t_dig = (score >= 8'd90) ? 4'd9 :
+                       (score >= 8'd80) ? 4'd8 :
+                       (score >= 8'd70) ? 4'd7 :
+                       (score >= 8'd60) ? 4'd6 :
+                       (score >= 8'd50) ? 4'd5 :
+                       (score >= 8'd40) ? 4'd4 :
+                       (score >= 8'd30) ? 4'd3 :
+                       (score >= 8'd20) ? 4'd2 :
+                       (score >= 8'd10) ? 4'd1 : 4'd0;
 
-    wire [3:0] t_dig      = (s_after_h >= 8'd90) ? 4'd9 :
-                            (s_after_h >= 8'd80) ? 4'd8 :
-                            (s_after_h >= 8'd70) ? 4'd7 :
-                            (s_after_h >= 8'd60) ? 4'd6 :
-                            (s_after_h >= 8'd50) ? 4'd5 :
-                            (s_after_h >= 8'd40) ? 4'd4 :
-                            (s_after_h >= 8'd30) ? 4'd3 :
-                            (s_after_h >= 8'd20) ? 4'd2 :
-                            (s_after_h >= 8'd10) ? 4'd1 : 4'd0;
+    wire [7:0] tens_x10 = ({4'b0, t_dig} << 3) + ({4'b0, t_dig} << 1);   // t_dig * 10
+    wire [7:0] ones_f   = score - tens_x10;
+    wire [3:0] o_dig    = ones_f[3:0];
 
-    wire [7:0] tens_x10   = ({4'b0, t_dig} << 3) + ({4'b0, t_dig} << 1);
-    wire [7:0] ones_full  = s_after_h - tens_x10;
-    wire [3:0] o_dig      = ones_full[3:0];
-
-    wire [6:0] segs_h = seg_pattern(h_dig);
     wire [6:0] segs_t = seg_pattern(t_dig);
     wire [6:0] segs_o = seg_pattern(o_dig);
 
-    wire [9:0] rx_h = x - DIG_X0;
-    wire [9:0] rx_t = x - DIG_X0 - DIG_PITCH;
-    wire [9:0] rx_o = x - DIG_X0 - 2*DIG_PITCH;
+    wire [9:0] rx_t = x - DIG_X0;
+    wire [9:0] rx_o = x - DIG_X0 - DIG_PITCH;
     wire [9:0] ry_d = y - DIG_Y0;
 
-    wire h_lit = (rx_h < DIG_W) && (ry_d < DIG_H) && seg_pixel(segs_h, rx_h[5:0], ry_d[5:0]);
     wire t_lit = (rx_t < DIG_W) && (ry_d < DIG_H) && seg_pixel(segs_t, rx_t[5:0], ry_d[5:0]);
     wire o_lit = (rx_o < DIG_W) && (ry_d < DIG_H) && seg_pixel(segs_o, rx_o[5:0], ry_d[5:0]);
-    wire score_digit_pixel = h_lit || t_lit || o_lit;
+    wire score_digit_pixel = t_lit || o_lit;
 
-    // hearts (lives), top-right
-    wire in_h0 = (x >= 10'd570) && (x < 10'd586) && (y >= 10'd4) && (y < 10'd20);
-    wire in_h1 = (x >= 10'd592) && (x < 10'd608) && (y >= 10'd4) && (y < 10'd20);
-    wire in_h2 = (x >= 10'd614) && (x < 10'd630) && (y >= 10'd4) && (y < 10'd20);
-    wire heart_pixel = (in_h0 && lives >= 2'd1) ||
-                       (in_h1 && lives >= 2'd2) ||
-                       (in_h2 && lives >= 2'd3);
+    // lives indicator (simple bar), top-right: 20 px per life
+    wire [9:0] lives_px = {8'd0, lives} * 10'd20;
+    wire lives_bar = (y >= 10'd4) && (y < 10'd20)
+                     && (x >= 10'd540) && (x < 10'd540 + lives_px);
 
     // hit line
     wire [10:0] y11_hud = {1'b0, y};
@@ -350,7 +336,7 @@ module ip_tiles #(
         else if (score_digit_pixel)   rgb = 6'b11_11_00;
         else if (hit_line_pressed)    rgb = 6'b11_11_00;
         else if (on_hit_line)         rgb = 6'b00_11_11;
-        else if (heart_pixel)         rgb = 6'b11_00_00;
+        else if (lives_bar)           rgb = 6'b11_00_00;
         else if (lane_div)            rgb = 6'b01_01_01;
         else                          rgb = 6'b00_00_01;
     end
