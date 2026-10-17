@@ -5,7 +5,7 @@ module ip_tiles #(
     parameter TILE_W         = 120,
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
-    parameter HIT_ZONE       = 60,
+    parameter HIT_ZONE       = 50,
     parameter [3:0] LEVEL_UP_AT = 4'd15
 ) (
     input  wire       clk, rst_n, step,
