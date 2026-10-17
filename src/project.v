@@ -3,6 +3,7 @@
 // picture pulse. Your core gives back one colour. Buttons: ui_in[0] left, ui_in[1] right.
 `default_nettype none
 
+
 module tt_um_kateiesa_game_piano_tiles (
     input  wire [7:0] ui_in,    // dedicated inputs
     output wire [7:0] uo_out,   // dedicated outputs
@@ -32,5 +33,5 @@ module tt_um_kateiesa_game_piano_tiles (
     assign uio_oe  = 8'd0;
 
     wire _unused = &{ena, uio_in, ui_in[7:2], 1'b0};
-    
+
 endmodule
