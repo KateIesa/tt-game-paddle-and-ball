@@ -24,6 +24,7 @@ module ip_tiles #(
     wire [3:0] btn_pushed = btn & ~btn_prev;
     wire       any_pushed = |btn_pushed;
 
+    // held-button signal for the hit-line highlight
     wire [3:0] lane_active = btn;
 
     // ------------------------------------------------------------------
@@ -34,14 +35,12 @@ module ip_tiles #(
     reg  [10:0] tile_x     [0:MAX_TILES-1];
     reg         tile_alive [0:MAX_TILES-1];
 
-    // game-state registers — ended + is_win replace game_over + won
+    // game-state registers
     reg  [5:0] spawn_count;
     reg  [3:0] lfsr;
     reg  [3:0] level_progress;
-    reg  [1:0] lives;
     reg  [2:0] level;
     reg        ended;
-    reg        is_win;
 
     reg  [4:0] speed_cur;
     reg  [5:0] interval_cur;
@@ -148,24 +147,15 @@ module ip_tiles #(
     endgenerate
 
     // ------------------------------------------------------------------
-    // game state machine
+    // game state machine — demote on miss, die at level 1
     // ------------------------------------------------------------------
     always @(posedge clk) begin
-        if (!rst_n) begin
+        if (!rst_n || restart_clear) begin
             spawn_count    <= 6'd0;
             level_progress <= 4'd0;
-            lives          <= 2'd3;
             level          <= 3'd1;
             ended          <= 1'b0;
-            is_win         <= 1'b0;
-            lfsr           <= 4'hA;
-        end else if (restart_clear) begin
-            spawn_count    <= 6'd0;
-            level_progress <= 4'd0;
-            lives          <= 2'd3;
-            level          <= 3'd1;
-            ended          <= 1'b0;
-            is_win         <= 1'b0;
+            if (!rst_n) lfsr <= 4'hA;
         end else if (!ended) begin
             if (spawn_due) begin
                 spawn_count <= 6'd0;
@@ -180,10 +170,8 @@ module ip_tiles #(
                     level_progress <= 4'd0;
                     if (level < 3'd5)
                         level <= level + 3'd1;
-                    else begin
-                        ended  <= 1'b1;
-                        is_win <= 1'b1;
-                    end
+                    else
+                        ended <= 1'b1;
                 end else begin
                     level_progress <= level_progress + 4'd1;
                 end
@@ -192,11 +180,12 @@ module ip_tiles #(
             end
 
             if (any_miss) begin
-                if (lives == 2'd1) begin
-                    ended  <= 1'b1;
-                    is_win <= 1'b0;
+                if (level == 3'd1) begin
+                    ended <= 1'b1;
+                end else begin
+                    level          <= level - 3'd1;
+                    level_progress <= 4'd0;
                 end
-                if (lives != 2'd0) lives <= lives - 2'd1;
             end
         end
     end
@@ -221,51 +210,44 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // Level-progress bar (×32, single shift — Step 5)
+    // Level-progress bar
     // ------------------------------------------------------------------
     wire [4:0] step_count  = {1'b0, level_progress} + 5'd1;
     wire [9:0] progress_px = {5'd0, step_count} << 5;
 
     wire progress_bar = (y < 10'd8) && (x < progress_px);
 
-    wire [5:0] progress_color = (level == 3'd1) ? 6'b00_11_00 :
-                                (level == 3'd2) ? 6'b11_11_00 :
-                                (level == 3'd3) ? 6'b11_10_00 :
-                                (level == 3'd4) ? 6'b11_00_00 :
-                                                  6'b11_00_11;
+    wire [5:0] progress_color = (level <= 3'd2) ? 6'b00_11_00 :
+                                (level == 3'd3) ? 6'b11_11_00 :
+                                                  6'b11_00_00;
 
     // ------------------------------------------------------------------
-    // Three separate life blocks
-    // ------------------------------------------------------------------
-    wire in_lives_row = (y >= 10'd10) && (y < 10'd26);
-    wire blk0 = in_lives_row && (x >= 10'd568) && (x < 10'd588) && (lives >= 2'd1);
-    wire blk1 = in_lives_row && (x >= 10'd592) && (x < 10'd612) && (lives >= 2'd2);
-    wire blk2 = in_lives_row && (x >= 10'd616) && (x < 10'd636) && (lives >= 2'd3);
-    wire lives_pixel = blk0 || blk1 || blk2;
-
-    // ------------------------------------------------------------------
-    // hit line (Step 6: lane dividers removed)
+    // hit line — RESTORED: press highlight per lane
     // ------------------------------------------------------------------
     wire [10:0] y11_hud = {1'b0, y};
     wire on_hit_line = (y11_hud >= HIT_Y) && (y11_hud < HIT_Y + 11'd2);
 
-    wire [1:0] x_lane  = (x < 10'd160) ? 2'd0 :
-                         (x < 10'd320) ? 2'd1 :
-                         (x < 10'd480) ? 2'd2 : 2'd3;
+    wire [1:0] x_lane = (x < 10'd160) ? 2'd0 :
+                        (x < 10'd320) ? 2'd1 :
+                        (x < 10'd480) ? 2'd2 : 2'd3;
     wire hit_line_pressed = on_hit_line && lane_active[x_lane];
 
     // ------------------------------------------------------------------
-    // colour priority (Step 8: is_win/ended replaces won/game_over)
+    // lane dividers — RESTORED
+    // ------------------------------------------------------------------
+    wire lane_div = (x == 10'd160) || (x == 10'd320) || (x == 10'd480);
+
+    // ------------------------------------------------------------------
+    // colour priority
     // ------------------------------------------------------------------
     always @(*) begin
-        if (!active)                  rgb = 6'b00_00_00;
-        else if (ended && is_win)     rgb = 6'b00_11_00;
-        else if (ended)               rgb = 6'b11_00_00;
-        else if (any_tile_pixel)      rgb = 6'b11_11_11;
-        else if (progress_bar)        rgb = progress_color;
-        else if (hit_line_pressed)    rgb = 6'b11_11_00;
-        else if (on_hit_line)         rgb = 6'b00_11_11;
-        else if (lives_pixel)         rgb = 6'b11_00_00;
-        else                          rgb = 6'b00_00_01;
+        if (!active)               rgb = 6'b00_00_00;
+        else if (ended)            rgb = 6'b11_00_00;
+        else if (any_tile_pixel)   rgb = 6'b11_11_11;
+        else if (progress_bar)     rgb = progress_color;
+        else if (hit_line_pressed) rgb = 6'b11_11_00;   // yellow pressed lane
+        else if (on_hit_line)      rgb = 6'b00_11_11;   // cyan default
+        else if (lane_div)         rgb = 6'b01_01_01;   // grey divider lines
+        else                       rgb = 6'b00_00_01;
     end
 endmodule
