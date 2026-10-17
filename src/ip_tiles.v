@@ -6,8 +6,7 @@ module ip_tiles #(
     parameter TILE_H         = 80,
     parameter HIT_Y          = 400,
     parameter HIT_ZONE       = 60,
-    parameter [4:0] FLASH_FRAMES  = 5'd12,
-    parameter [5:0] LEVEL_UP_AT   = 6'd16      // 16 hits per level
+    parameter [3:0] LEVEL_UP_AT = 4'd15
 ) (
     input  wire       clk, rst_n, step,
     input  wire [3:0] btn,
@@ -30,26 +29,14 @@ module ip_tiles #(
     endfunction
 
     // ------------------------------------------------------------------
-    // button edge detection
+    // button edge detection  (no per-lane flash afterglow)
     // ------------------------------------------------------------------
     reg  [3:0] btn_prev;
     always @(posedge clk) btn_prev <= btn;
     wire [3:0] btn_pushed = btn & ~btn_prev;
     wire       any_pushed = |btn_pushed;
 
-    reg  [4:0] flash_cnt [0:3];
-    wire [3:0] lane_active;
-    genvar fb;
-    generate
-        for (fb = 0; fb < 4; fb = fb + 1) begin : flash_gen
-            always @(posedge clk) begin
-                if (!rst_n)                  flash_cnt[fb] <= 5'd0;
-                else if (btn_pushed[fb])     flash_cnt[fb] <= FLASH_FRAMES;
-                else if (flash_cnt[fb] != 0) flash_cnt[fb] <= flash_cnt[fb] - 5'd1;
-            end
-            assign lane_active[fb] = btn[fb] | (flash_cnt[fb] != 5'd0);
-        end
-    endgenerate
+    wire [3:0] lane_active = btn;
 
     // ------------------------------------------------------------------
     // per-tile state
@@ -58,28 +45,27 @@ module ip_tiles #(
     reg  [1:0] tile_lane  [0:MAX_TILES-1];
     reg        tile_alive [0:MAX_TILES-1];
 
-    // game state
-    reg  [7:0] spawn_count;
-    reg  [7:0] lfsr;
-    reg  [1:0] prev_lane;
-    reg  [5:0] level_progress;   // 0..LEVEL_UP_AT-1
+    // narrowed game-state registers
+    reg  [5:0] spawn_count;      // max 30
+    reg  [3:0] lfsr;             // 4-bit LFSR
+    reg  [3:0] level_progress;   // max 15
     reg  [1:0] lives;
-    reg  [2:0] level;
+    reg  [2:0] level;            // max 5
     reg        game_over;
     reg        won;
 
+    reg  [4:0] speed_cur;        // max 12
+    reg  [5:0] interval_cur;     // max 30
+
     wire restart_clear = (game_over || won) && any_pushed;
 
-    // difficulty table
-    reg [9:0] speed_cur;
-    reg [7:0] interval_cur;
     always @(posedge clk) begin
         case (level)
-            3'd2: begin speed_cur <= 10'd6;  interval_cur <= 8'd20; end
-            3'd3: begin speed_cur <= 10'd8;  interval_cur <= 8'd15; end
-            3'd4: begin speed_cur <= 10'd10; interval_cur <= 8'd12; end
-            3'd5: begin speed_cur <= 10'd12; interval_cur <= 8'd10; end
-            default: begin speed_cur <= 10'd4; interval_cur <= 8'd30; end
+            3'd2: begin speed_cur <= 5'd6;  interval_cur <= 6'd20; end
+            3'd3: begin speed_cur <= 5'd8;  interval_cur <= 6'd15; end
+            3'd4: begin speed_cur <= 5'd10; interval_cur <= 6'd12; end
+            3'd5: begin speed_cur <= 5'd12; interval_cur <= 6'd10; end
+            default: begin speed_cur <= 5'd4; interval_cur <= 6'd30; end
         endcase
     end
 
@@ -122,7 +108,7 @@ module ip_tiles #(
     wire progress_down = !any_hit &&  any_wrong_press;
 
     // ------------------------------------------------------------------
-    // spawn slot finder + lane picker
+    // spawn slot finder  (integer declared inside the always block)
     // ------------------------------------------------------------------
     reg [IDX_W-1:0] spawn_idx;
     reg             spawn_slot_free;
@@ -137,13 +123,13 @@ module ip_tiles #(
             end
     end
 
-    wire [1:0] next_lane  = (lfsr[1:0] == prev_lane) ? (prev_lane + 2'd1) : lfsr[1:0];
-    wire spawn_due        = step && !game_over && !won
-                            && (spawn_count >= interval_cur - 8'd1);
-    wire spawn_pulse      = spawn_due && spawn_slot_free;
+    wire [1:0] next_lane = lfsr[1:0];
+    wire spawn_due       = step && !game_over && !won
+                           && (spawn_count >= interval_cur - 6'd1);
+    wire spawn_pulse     = spawn_due && spawn_slot_free;
 
     // ------------------------------------------------------------------
-    // per-tile always blocks
+    // per-tile always blocks  (hittable + miss merged)
     // ------------------------------------------------------------------
     generate
         for (g = 0; g < MAX_TILES; g = g + 1) begin : tile_state
@@ -157,12 +143,9 @@ module ip_tiles #(
                     tile_alive[g] <= 1'b1;
                     tile_y[g]     <= 10'd0;
                     tile_lane[g]  <= next_lane;
-                end else if (hittable[g]) begin
+                end else if (hittable[g] || miss_vec[g]) begin
                     tile_alive[g] <= 1'b0;
-                end else if (miss_vec[g]) begin
-                    tile_alive[g] <= 1'b0;
-                end else if (step && !game_over && !won
-                             && tile_alive[g] && !miss_vec[g]) begin
+                end else if (step && !game_over && !won && tile_alive[g]) begin
                     tile_y[g] <= tile_y[g] + speed_cur;
                 end
             end
@@ -174,49 +157,43 @@ module ip_tiles #(
     // ------------------------------------------------------------------
     always @(posedge clk) begin
         if (!rst_n) begin
-            spawn_count    <= 8'd0;
-            level_progress <= 6'd0;
+            spawn_count    <= 6'd0;
+            level_progress <= 4'd0;
             lives          <= 2'd3;
             level          <= 3'd1;
             game_over      <= 1'b0;
             won            <= 1'b0;
-            lfsr           <= 8'hA5;
-            prev_lane      <= 2'd0;
+            lfsr           <= 4'hA;
         end else if (restart_clear) begin
-            spawn_count    <= 8'd0;
-            level_progress <= 6'd0;
+            spawn_count    <= 6'd0;
+            level_progress <= 4'd0;
             lives          <= 2'd3;
             level          <= 3'd1;
             game_over      <= 1'b0;
             won            <= 1'b0;
-            prev_lane      <= 2'd0;
         end else if (!game_over && !won) begin
             if (spawn_due) begin
-                spawn_count <= 8'd0;
-                if (spawn_pulse) begin
-                    prev_lane <= next_lane;
-                    lfsr      <= {lfsr[6:0], lfsr[7]^lfsr[5]^lfsr[4]^lfsr[3]};
-                end
+                spawn_count <= 6'd0;
+                if (spawn_pulse)
+                    lfsr <= {lfsr[2:0], lfsr[3]^lfsr[0]};   // maximal 4-bit LFSR
             end else if (step) begin
-                spawn_count <= spawn_count + 8'd1;
+                spawn_count <= spawn_count + 6'd1;
             end
 
-            // progress / level-up / win
             if (progress_up) begin
-                if (level_progress == LEVEL_UP_AT - 6'd1) begin
-                    level_progress <= 6'd0;
+                if (level_progress == LEVEL_UP_AT) begin
+                    level_progress <= 4'd0;
                     if (level < 3'd5)
                         level <= level + 3'd1;
                     else
                         won <= 1'b1;
                 end else begin
-                    level_progress <= level_progress + 6'd1;
+                    level_progress <= level_progress + 4'd1;
                 end
-            end else if (progress_down && level_progress > 6'd0) begin
-                level_progress <= level_progress - 6'd1;
+            end else if (progress_down && level_progress > 4'd0) begin
+                level_progress <= level_progress - 4'd1;
             end
 
-            // lives
             if (any_miss) begin
                 if (lives == 2'd1) game_over <= 1'b1;
                 if (lives != 2'd0) lives     <= lives - 2'd1;
@@ -244,25 +221,22 @@ module ip_tiles #(
     wire any_tile_pixel = |tile_pixel;
 
     // ------------------------------------------------------------------
-    // Progress bar (replaces score display)
-    // LEVEL_UP_AT = 16 -> 16 hits per level, 40 px per step
-    // bar shows (progress + 1) * 40 px, i.e. 40 .. 640 px
+    // Level-progress bar  (color = current level)
     // ------------------------------------------------------------------
-    wire [4:0] step_count  = level_progress[4:0] + 5'd1;
+    wire [4:0] step_count  = {1'b0, level_progress} + 5'd1;
     wire [9:0] progress_px = ({5'd0, step_count} << 5)
                            + ({5'd0, step_count} << 3);   // step_count * 40
 
     wire progress_bar = (y < 10'd8) && (x < progress_px);
 
-    // Bar colour per level — the visible colour IS the level indicator
     wire [5:0] progress_color = (level == 3'd1) ? 6'b00_11_00 :   // green
                                 (level == 3'd2) ? 6'b11_11_00 :   // yellow
                                 (level == 3'd3) ? 6'b11_10_00 :   // orange
                                 (level == 3'd4) ? 6'b11_00_00 :   // red
-                                                  6'b11_00_11;    // magenta (L5)
+                                                  6'b11_00_11;    // magenta
 
     // ------------------------------------------------------------------
-    // Lives — THREE separate blocks at top-right (was one blob)
+    // Three separate life blocks, top-right
     // ------------------------------------------------------------------
     wire blk0 = (x >= 10'd568) && (x < 10'd588) && (y >= 10'd10) && (y < 10'd26)
                 && (lives >= 2'd1);
