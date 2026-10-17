@@ -28,7 +28,7 @@ module tb ();
 `endif
 
   // Replace tt_um_example with your module name:
-  tt_um_kateiesa_game_paddle_and_ball user_project (
+  tt_um_kateiesa_game_piano_tiles user_project (
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST
