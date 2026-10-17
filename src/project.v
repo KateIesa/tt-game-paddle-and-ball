@@ -32,4 +32,5 @@ module tt_um_kateiesa_game_piano_tiles (
     assign uio_oe  = 8'd0;
 
     wire _unused = &{ena, uio_in, ui_in[7:2], 1'b0};
+    
 endmodule
