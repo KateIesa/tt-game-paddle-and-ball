@@ -27,6 +27,7 @@ module tt_um_kateiesa_game_piano_tiles (
         .rgb(rgb)
     );
 
+
     // TinyVGA PMOD pin order: {hsync, B0, G0, R0, vsync, B1, G1, R1}
     assign uo_out = {hsync, rgb[0], rgb[2], rgb[4], vsync, rgb[1], rgb[3], rgb[5]};
     assign uio_out = 8'd0;
